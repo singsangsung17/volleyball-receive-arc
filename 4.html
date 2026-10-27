@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>排球 4 人接發球：動態弧形包圍與視線展開</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
+
+    :root {
+      --bg-page: #f5f2eb;
+      --bg-card: #ebe6dc;
+      --court-bg: #d3b192;
+      --court-border: #c5a180;
+      --text-dark: #232220;
+      --text-muted: #6e655f;
+      --server-red: #e62e4d;
+      --navel-gold: #f59e0b;
+    }
+
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body {
+      margin: 0;
+      background-color: var(--bg-page);
+      color: var(--text-dark);
+      font-family: 'Noto Sans TC', -apple-system, BlinkMacSystemFont, sans-serif;
+      overscroll-behavior: none;
+    }
+
+    /* 滑桿客製化 */
+    input[type="range"].server-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 10px;
+      background: #d5cfc4;
+      border-radius: 999px;
+      outline: none;
+      border: 1px solid #c2bab0;
+    }
+
+    input[type="range"].server-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--server-red);
+      border: 3px solid #ffffff;
+      box-shadow: 0 3px 8px rgba(230, 46, 77, 0.4);
+      cursor: grab;
+      transition: transform 0.15s ease;
+    }
+
+    input[type="range"].server-slider::-webkit-slider-thumb:active {
+      cursor: grabbing;
+      transform: scale(1.15);
+    }
+
+    /* 球場容器 */
+    .court-frame {
+      background-color: var(--court-bg);
+      border: 6px solid var(--court-border);
+      border-radius: 20px;
+      box-shadow: 0 10px 28px rgba(60, 45, 30, 0.12);
+      touch-action: none;
+    }
+
+    .server-draggable {
+      cursor: grab;
+    }
+    .server-draggable:active {
+      cursor: grabbing;
+    }
+
+    @keyframes pulseRing {
+      0% { r: 23px; opacity: 0.7; }
+      100% { r: 36px; opacity: 0; }
+    }
+    .server-pulse {
+      animation: pulseRing 1.8s cubic-bezier(0.2, 0.6, 0.35, 1) infinite;
+    }
+  </style>
+</head>
+<body class="min-h-screen py-4 px-3 sm:px-6 flex flex-col items-center">
+
+  <div class="w-full max-w-lg space-y-3.5">
+
+    <!-- 頂部核心口訣與動態提示卡 -->
+    <header class="bg-[#ebe6dc] border border-[#dcd5c9] rounded-2xl p-4 shadow-sm">
+      <div class="flex items-center justify-between gap-2 mb-1.5">
+        <h1 class="text-base sm:text-lg font-black tracking-tight text-[#232220]">
+          4人接發球：動態弧形包圍與視線展開
+        </h1>
+        <span id="statusBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-[#232220] text-[#f5f2eb] font-bold whitespace-nowrap">
+          中間發球
+        </span>
+      </div>
+      <p id="statusDesc" class="text-xs sm:text-sm text-[#5c544e] leading-relaxed">
+        左右拖曳紅色的<strong class="text-[#e62e4d]">「發」</strong>球員：4 位接發球員的<strong class="text-[#232220]">肚臍尖角</strong>與<strong class="text-[#232220]">包圍弧線</strong>永遠正對發球員，且同側邊線球員會<strong class="text-[#232220]">主動退後守住直線長球</strong>。
+      </p>
+    </header>
+
+    <!-- 滑桿與互動按鈕控制區 -->
+    <section class="bg-[#ebe6dc] border border-[#dcd5c9] rounded-2xl p-3.5 sm:p-4 shadow-sm space-y-3">
+      <!-- 滑桿列 -->
+      <div class="flex items-center gap-3">
+        <span class="text-xs font-bold text-[#6e655f] whitespace-nowrap">發球靠左</span>
+        <input id="serverSlider" type="range" min="15" max="85" step="0.5" value="50" class="server-slider" />
+        <span class="text-xs font-bold text-[#6e655f] whitespace-nowrap">發球靠右</span>
+      </div>
+
+      <!-- 快速位置切換 -->
+      <div class="grid grid-cols-3 gap-2">
+        <button id="btnLeft" class="py-2 px-3 rounded-xl border border-[#cec6b8] bg-[#fdfbf7] hover:bg-white active:scale-[0.98] text-xs sm:text-sm font-bold text-[#232220] transition">
+          極左發球
+        </button>
+        <button id="btnCenter" class="py-2 px-3 rounded-xl border border-[#cec6b8] bg-[#fdfbf7] hover:bg-white active:scale-[0.98] text-xs sm:text-sm font-bold text-[#232220] transition">
+          中間發球
+        </button>
+        <button id="btnRight" class="py-2 px-3 rounded-xl border border-[#cec6b8] bg-[#fdfbf7] hover:bg-white active:scale-[0.98] text-xs sm:text-sm font-bold text-[#232220] transition">
+          極右發球
+        </button>
+      </div>
+
+      <!-- 教學輔助測試鈕 -->
+      <div class="grid grid-cols-2 gap-2 pt-0.5">
+        <button id="btnSimServe" class="py-2.5 px-3 rounded-xl bg-[#232220] hover:bg-[#383633] active:scale-[0.98] text-white text-xs sm:text-sm font-bold shadow-sm transition flex items-center justify-center gap-1.5">
+          <span>▶ 發球測試 (看正面迎球)</span>
+        </button>
+        <button id="btnGhost" class="py-2.5 px-3 rounded-xl border border-[#cec6b8] bg-[#fdfbf7] hover:bg-white active:scale-[0.98] text-[#232220] text-xs sm:text-sm font-bold transition flex items-center justify-center gap-1">
+          <span>對比死板平行站位</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- 球場主畫布 (SVG 400 x 500) -->
+    <main class="court-frame p-2.5 sm:p-3 relative">
+      <svg id="courtSvg" viewBox="0 0 400 500" class="w-full h-auto block overflow-visible">
+        <defs>
+          <!-- 扇形聚光燈柔和漸層 -->
+          <linearGradient id="coneGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#ffffff" stop-opacity="0.34" />
+            <stop offset="100%" stop-color="#ffffff" stop-opacity="0.03" />
+          </linearGradient>
+        </defs>
+
+        <!-- 球場外框邊線與底線 (x: 16~384, y: 20~480) -->
+        <rect x="16" y="20" width="368" height="460" rx="6"
+              fill="none" stroke="#ffffff" stroke-width="3.5" opacity="0.92" />
+
+        <!-- 對面發球移動軌道虛線 -->
+        <line x1="56" y1="68" x2="344" y2="68"
+              stroke="#ffffff" stroke-width="2" stroke-dasharray="5 5" opacity="0.55" />
+
+        <!-- 球網 (y: 140) -->
+        <line x1="10" y1="140" x2="390" y2="140"
+              stroke="#ffffff" stroke-width="6" stroke-linecap="round" />
+
+        <!-- 我方三米攻擊線 (y: 255) -->
+        <line x1="16" y1="255" x2="384" y2="255"
+              stroke="#ffffff" stroke-width="3" opacity="0.88" />
+
+        <!-- 網前目標舉球點 (淡淡的目標虛線圈，供發球測試墊球對準) -->
+        <g id="targetSetterSpot" transform="translate(245, 168)" opacity="0.65">
+          <circle r="16" fill="rgba(255,255,255,0.12)" stroke="#ffffff" stroke-width="2" stroke-dasharray="4 3" />
+          <text x="0" y="4" text-anchor="middle" fill="#ffffff" font-size="10" font-weight="700">目標</text>
+        </g>
+
+        <!-- 1. 發球扇形光束背景 -->
+        <polygon id="visionCone" points="" fill="url(#coneGrad)" />
+
+        <!-- 2. 死板平行站位殘影圖層 (預設隱藏) -->
+        <g id="ghostLayer" class="hidden"></g>
+
+        <!-- 3. 接發球包圍弧線 (Catmull-Rom 平滑粗白半透明弧線) -->
+        <path id="receiveArcGlow" d="" fill="none" stroke="#f59e0b"
+              stroke-width="12" stroke-linecap="round" opacity="0.18" />
+        <path id="receiveArc" d="" fill="none" stroke="#ffffff"
+              stroke-width="6.5" stroke-linecap="round" opacity="0.68" />
+
+        <!-- 4. 發球員連向 4 位接球員的視覺直線 (4條等角展開白色虛線) -->
+        <g id="sightLines"></g>
+
+        <!-- 5. 我方 4 位接發球員棋子圖層 (1, 2, 3, 4) -->
+        <g id="receiversLayer"></g>
+
+        <!-- 6. 發球測試動畫排球 -->
+        <g id="ballGroup" class="hidden">
+          <circle id="ballShadow" cx="0" cy="8" r="9" fill="rgba(0,0,0,0.2)" />
+          <g id="ballBody">
+            <circle r="11.5" fill="#fffbeb" stroke="#232220" stroke-width="2.5" />
+            <path d="M -8 -4 Q 0 -10 8 -4 M -9 3 Q 0 -3 9 3 M -4 -9 Q 2 0 -4 9"
+                  fill="none" stroke="#d97706" stroke-width="1.8" stroke-linecap="round" />
+          </g>
+        </g>
+
+        <!-- 7. 對面發球員「發」 (可左右拖曳) -->
+        <g id="serverNode" class="server-draggable" transform="translate(200, 68)">
+          <circle class="server-pulse" cx="0" cy="0" r="23" fill="none" stroke="#e62e4d" stroke-width="2.5" />
+          <!-- 左右拖曳引導小箭頭 -->
+          <polygon points="-36,0 -28,-5 -28,5" fill="#ffffff" opacity="0.92" />
+          <polygon points="36,0 28,-5 28,5" fill="#ffffff" opacity="0.92" />
+          <circle r="23" fill="#e62e4d" stroke="#ffffff" stroke-width="3.5"
+                  filter="drop-shadow(0 4px 8px rgba(0,0,0,0.28))" />
+          <text x="0" y="7" text-anchor="middle" fill="#ffffff"
+                font-size="19" font-weight="900">發</text>
+        </g>
+      </svg>
+    </main>
+
+    <!-- 底部圖例說明 -->
+    <footer class="flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-xs text-[#6e655f] pt-0.5">
+      <div class="flex items-center gap-1.5">
+        <span class="w-3 h-3 rounded-full bg-[#f59e0b] border border-[#232220] inline-block"></span>
+        <span>橘色尖角＝肚臍正面朝向</span>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span class="w-4 h-0.5 bg-white border border-stone-400 inline-block"></span>
+        <span>白色虛線＝發球視線（扇形均分不重疊）</span>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span class="w-4 h-1.5 rounded-full bg-white/80 border border-stone-400 inline-block"></span>
+        <span>粗白弧線＝接發包圍碗口</span>
+      </div>
+    </footer>
+
+  </div>
+
+  <script>
+    (function () {
+      const svg = document.getElementById('courtSvg');
+      const serverNode = document.getElementById('serverNode');
+      const serverSlider = document.getElementById('serverSlider');
+      const visionCone = document.getElementById('visionCone');
+      const receiveArc = document.getElementById('receiveArc');
+      const receiveArcGlow = document.getElementById('receiveArcGlow');
+      const sightLines = document.getElementById('sightLines');
+      const receiversLayer = document.getElementById('receiversLayer');
+      const ghostLayer = document.getElementById('ghostLayer');
+      const ballGroup = document.getElementById('ballGroup');
+      const ballBody = document.getElementById('ballBody');
+      const ballShadow = document.getElementById('ballShadow');
+
+      const statusBadge = document.getElementById('statusBadge');
+      const statusDesc = document.getElementById('statusDesc');
+
+      const btnLeft = document.getElementById('btnLeft');
+      const btnCenter = document.getElementById('btnCenter');
+      const btnRight = document.getElementById('btnRight');
+      const btnSimServe = document.getElementById('btnSimServe');
+      const btnGhost = document.getElementById('btnGhost');
+
+      // 球場常數 (SVG 座標系 400 x 500)
+      const SERVER_Y = 68;
+      let serverX = 200; // 範圍 60 (15%) ~ 340 (85%)
+      let showGhost = false;
+      let currentReceivers = [];
+      let animFrameId = null;
+
+      /**
+       * 核心演算法：計算 4 位接發球員的動態座標
+       * 嚴格落實規格二：
+       * 1. 扇形等角展開（防視線重疊）：將最左(1號)與最右(4號)對發球員的視線夾角均勻三等分插值，確保 4 條虛線像扇子一樣平均張開。
+       * 2. 邊線球員退後防守直線長球：
+       *    - 發球員往左拉 (s < 0) -> 左邊線(1號)主動往後退深守住左側直線長球。
+       *    - 發球員往右拉 (s > 0) -> 右邊線(4號)主動往後退深守住右側直線長球。
+       */
+      function computeReceivers(sx) {
+        // s: -1 (極左發球 sx=60) ~ 0 (中間發球 sx=200) ~ +1 (極右發球 sx=340)
+        const s = (sx - 200) / 140;
+
+        // 步驟 A：4 名接球員（1~4號，由左至右）的初步橫向 X 座標
+        const rawX = [
+          80  - s * 10, // 1號（左邊線）
+          156 - s * 12, // 2號（中左深）
+          244 - s * 12, // 3號（中右深）
+          320 - s * 10  // 4號（右邊線）
+        ];
+
+        // 步驟 B：4 名接球員的縱向 Y 座標（深度，三米線=255，底線=480）
+        // 當 s < 0（發球在左），1號左邊線大幅退後 (+60px 至 y≈396) 守直線長球；
+        // 當 s > 0（發球在右），4號右邊線大幅退後 (+60px 至 y≈396) 守直線長球。
+        const leftWingRetreat  = s < 0 ? (-s) * 60 : -s * 22;
+        const rightWingRetreat = s > 0 ? (s)  * 60 :  s * 22;
+
+        const yCoords = [
+          336 + leftWingRetreat,            // 1號（左邊線）
+          414 - s * 12 + Math.abs(s) * 6,   // 2號（中左深）
+          414 + s * 12 + Math.abs(s) * 6,   // 3號（中右深）
+          336 + rightWingRetreat            // 4號（右邊線）
+        ];
+
+        // 步驟 C：底層「扇形等角展開」校正（確保 4 條視線夾角均勻、絕不重疊）
+        const angles = rawX.map((rx, i) => Math.atan2(yCoords[i] - SERVER_Y, rx - sx));
+        const thetaLeft = angles[0];
+        const thetaRight = angles[3];
+
+        const result = [];
+        for (let i = 0; i < 4; i++) {
+          const targetRatio = i / 3; // 0, 1/3, 2/3, 1 等角分佈
+          const evenTheta = thetaLeft + (thetaRight - thetaLeft) * targetRatio;
+          // 以 78% 等角插值 + 22% 自然站位混合，確保不論拉到哪裡視線都均勻分開
+          const blendedTheta = angles[i] * 0.22 + evenTheta * 0.78;
+
+          const dy = yCoords[i] - SERVER_Y;
+          let x = sx + dy / Math.tan(blendedTheta);
+          x = Math.max(46, Math.min(354, x));
+
+          result.push({
+            id: i + 1,
+            x: x,
+            y: yCoords[i]
+          });
+        }
+
+        return result;
+      }
+
+      /**
+       * 產生平滑串聯 4 位接發球員的 Catmull-Rom 貝茲曲線 Path
+       */
+      function buildSmoothArcPath(pts) {
+        if (pts.length < 4) return '';
+        let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+        for (let i = 0; i < pts.length - 1; i++) {
+          const p0 = pts[i === 0 ? 0 : i - 1];
+          const p1 = pts[i];
+          const p2 = pts[i + 1];
+          const p3 = pts[i + 2 < pts.length ? i + 2 : pts.length - 1];
+
+          const cp1x = p1.x + (p2.x - p0.x) / 6;
+          const cp1y = p1.y + (p2.y - p0.y) / 6;
+          const cp2x = p2.x - (p3.x - p1.x) / 6;
+          const cp2y = p2.y - (p3.y - p1.y) / 6;
+
+          d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+        }
+        return d;
+      }
+
+      /**
+       * 更新頂部狀態與口訣提示
+       */
+      function updateCoachStatus(sx) {
+        const s = (sx - 200) / 140;
+        if (s < -0.22) {
+          statusBadge.textContent = '發球靠左（左線退防）';
+          statusBadge.className = 'text-xs px-2.5 py-0.5 rounded-full bg-[#e62e4d] text-white font-bold whitespace-nowrap';
+          statusDesc.innerHTML =
+            '發球員站在左上方：<strong class="text-[#232220]">1號（左邊線）主動往後退深</strong>守住整條左側直線長球；全隊弧形碗口朝左上包圍，4 條視線平均展開不互擋。';
+        } else if (s > 0.22) {
+          statusBadge.textContent = '發球靠右（右線退防）';
+          statusBadge.className = 'text-xs px-2.5 py-0.5 rounded-full bg-[#e62e4d] text-white font-bold whitespace-nowrap';
+          statusDesc.innerHTML =
+            '發球員站在右上方：<strong class="text-[#232220]">4號（右邊線）主動往後退深</strong>守住整條右側直線長球；全隊弧形碗口朝右上包圍，4 條視線平均展開不互擋。';
+        } else {
+          statusBadge.textContent = '中間發球（對稱包圍）';
+          statusBadge.className = 'text-xs px-2.5 py-0.5 rounded-full bg-[#232220] text-[#f5f2eb] font-bold whitespace-nowrap';
+          statusDesc.innerHTML =
+            '左右拖曳紅色的<strong class="text-[#e62e4d]">「發」</strong>球員：4 位接發球員的<strong class="text-[#232220]">肚臍尖角</strong>與<strong class="text-[#232220]">包圍弧線</strong>永遠正對發球員，且同側邊線球員會<strong class="text-[#232220]">主動退後守住直線長球</strong>。';
+        }
+      }
+
+      /**
+       * 主畫面渲染
+       */
+      function render() {
+        // 1. 移動對面發球員
+        serverNode.setAttribute('transform', `translate(${serverX.toFixed(1)}, ${SERVER_Y})`);
+
+        // 2. 計算我方 4 位接球員座標
+        currentReceivers = computeReceivers(serverX);
+
+        // 3. 更新扇形聚光燈背景
+        const p0 = currentReceivers[0];
+        const p1 = currentReceivers[1];
+        const p2 = currentReceivers[2];
+        const p3 = currentReceivers[3];
+        visionCone.setAttribute(
+          'points',
+          `${serverX.toFixed(1)},${SERVER_Y} ${p0.x.toFixed(1)},${p0.y.toFixed(1)} ${p1.x.toFixed(1)},${p1.y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)} ${p3.x.toFixed(1)},${p3.y.toFixed(1)}`
+        );
+
+        // 4. 更新 Catmull-Rom 包圍弧線
+        const arcPath = buildSmoothArcPath(currentReceivers);
+        receiveArc.setAttribute('d', arcPath);
+        receiveArcGlow.setAttribute('d', arcPath);
+
+        // 5. 更新 4 條視覺虛線
+        sightLines.innerHTML = currentReceivers
+          .map(
+            (p) => `
+            <line x1="${serverX.toFixed(1)}" y1="${SERVER_Y}"
+                  x2="${p.x.toFixed(1)}" y2="${p.y.toFixed(1)}"
+                  stroke="#ffffff" stroke-width="2.4"
+                  stroke-dasharray="6 6" opacity="0.86" />
+          `
+          )
+          .join('');
+
+        // 6. 更新死板平行站位殘影 (若開啟對比)
+        if (showGhost) {
+          ghostLayer.classList.remove('hidden');
+          // 死板站位：兩翼站太淺(y=305)留出直線長球大空檔，且肚臍固定朝正上方不轉向
+          const staticPts = [
+            { id: 1, x: 80,  y: 305 },
+            { id: 2, x: 160, y: 400 },
+            { id: 3, x: 240, y: 400 },
+            { id: 4, x: 320, y: 305 }
+          ];
+          const ghostArc = buildSmoothArcPath(staticPts);
+          let ghostHtml = `
+            <path d="${ghostArc}" fill="none" stroke="#dc2626" stroke-width="4" stroke-dasharray="6 5" opacity="0.55" />
+          `;
+          staticPts.forEach((sp) => {
+            ghostHtml += `
+              <g transform="translate(${sp.x}, ${sp.y})" opacity="0.46">
+                <polygon points="0,-33 -7,-20 7,-20" fill="#dc2626" />
+                <circle r="22" fill="#e5e0d8" stroke="#dc2626" stroke-width="2.5" stroke-dasharray="4 3" />
+                <text x="0" y="6" text-anchor="middle" fill="#991b1b" font-size="15" font-weight="800">${sp.id}</text>
+              </g>
+            `;
+          });
+          ghostLayer.innerHTML = ghostHtml;
+        } else {
+          ghostLayer.classList.add('hidden');
+        }
+
+        // 7. 繪製 4 位接發球員棋子 + 橘黃色肚臍朝向小尖角
+        receiversLayer.innerHTML = currentReceivers
+          .map((p) => {
+            const rad = Math.atan2(SERVER_Y - p.y, serverX - p.x);
+            const deg = (rad * 180) / Math.PI + 90;
+
+            return `
+              <g transform="translate(${p.x.toFixed(1)}, ${p.y.toFixed(1)})">
+                <!-- 肚臍/胸口朝向尖角 (永遠對準發球員) -->
+                <g transform="rotate(${deg.toFixed(1)})">
+                  <polygon points="0,-35 -8.5,-21 8.5,-21"
+                           fill="#f59e0b" stroke="#232220" stroke-width="2"
+                           stroke-linejoin="round" />
+                </g>
+                <!-- 球員白底粗黑框圓形棋子 -->
+                <circle r="23" fill="#ffffff" stroke="#232220" stroke-width="4.2"
+                        filter="drop-shadow(0 3px 6px rgba(0,0,0,0.18))" />
+                <!-- 純粹編號 1 ~ 4 -->
+                <text x="0" y="7.5" text-anchor="middle" fill="#232220"
+                      font-size="20" font-weight="900">${p.id}</text>
+              </g>
+            `;
+          })
+          .join('');
+
+        updateCoachStatus(serverX);
+      }
+
+      /**
+       * 設定發球員百分比位置 (15% ~ 85%)
+       */
+      function setServerByPercent(pct) {
+        const clamped = Math.max(15, Math.min(85, pct));
+        serverSlider.value = clamped;
+        serverX = (clamped / 100) * 400;
+        render();
+      }
+
+      /**
+       * 平滑動畫移動發球員
+       */
+      function animateServerToPercent(targetPct) {
+        const startPct = (serverX / 400) * 100;
+        const duration = 240;
+        const startTime = performance.now();
+
+        function step(now) {
+          const p = Math.min(1, (now - startTime) / duration);
+          const ease = 1 - Math.pow(1 - p, 3);
+          const currentPct = startPct + (targetPct - startPct) * ease;
+          setServerByPercent(currentPct);
+          if (p < 1) requestAnimationFrame(step);
+        }
+        requestAnimationFrame(step);
+      }
+
+      // 滑桿連動
+      serverSlider.addEventListener('input', (e) => {
+        setServerByPercent(parseFloat(e.target.value));
+      });
+
+      // 快速按鈕連動
+      btnLeft.addEventListener('click', () => animateServerToPercent(16));
+      btnCenter.addEventListener('click', () => animateServerToPercent(50));
+      btnRight.addEventListener('click', () => animateServerToPercent(84));
+
+      // 對比死板平行站位切換
+      btnGhost.addEventListener('click', () => {
+        showGhost = !showGhost;
+        if (showGhost) {
+          btnGhost.textContent = '✕ 隱藏死板站位殘影';
+          btnGhost.className = 'py-2.5 px-3 rounded-xl border border-[#f87171] bg-[#fee2e2] text-[#991b1b] text-xs sm:text-sm font-bold transition flex items-center justify-center gap-1';
+        } else {
+          btnGhost.textContent = '對比死板平行站位';
+          btnGhost.className = 'py-2.5 px-3 rounded-xl border border-[#cec6b8] bg-[#fdfbf7] hover:bg-white text-[#232220] text-xs sm:text-sm font-bold transition flex items-center justify-center gap-1';
+        }
+        render();
+      });
+
+      // 球場上直接拖曳「發」球員 (支援手機觸控與滑鼠)
+      let isDragging = false;
+
+      function clientXToPercent(clientX) {
+        const rect = svg.getBoundingClientRect();
+        return ((clientX - rect.left) / rect.width) * 100;
+      }
+
+      serverNode.addEventListener('pointerdown', (e) => {
+        isDragging = true;
+        serverNode.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      });
+
+      svg.addEventListener('pointerdown', (e) => {
+        const rect = svg.getBoundingClientRect();
+        const svgY = ((e.clientY - rect.top) / rect.height) * 500;
+        if (svgY < 125) {
+          isDragging = true;
+          setServerByPercent(clientXToPercent(e.clientX));
+        }
+      });
+
+      window.addEventListener('pointermove', (e) => {
+        if (!isDragging) return;
+        setServerByPercent(clientXToPercent(e.clientX));
+      });
+
+      window.addEventListener('pointerup', () => {
+        isDragging = false;
+      });
+
+      // 發球測試動畫（優先測試直線邊線長球或輪流發向 4 位接球員）
+      let serveCycleIdx = 0;
+      btnSimServe.addEventListener('click', () => {
+        if (animFrameId) cancelAnimationFrame(animFrameId);
+
+        // 若發球明顯靠左或靠右，優先測試同側退防的邊線球員，之後輪流測試全部 4 人
+        const s = (serverX - 200) / 140;
+        let target;
+        if (serveCycleIdx % 2 === 0 && s < -0.3) {
+          target = currentReceivers[0]; // 測試 1號左邊線長球
+        } else if (serveCycleIdx % 2 === 0 && s > 0.3) {
+          target = currentReceivers[3]; // 測試 4號右邊線長球
+        } else {
+          target = currentReceivers[serveCycleIdx % 4];
+        }
+        serveCycleIdx++;
+
+        // 計算胸口正面迎球點（朝向發球員方向偏移 18px）
+        const rad = Math.atan2(SERVER_Y - target.y, serverX - target.x);
+        const hitX = target.x + Math.cos(rad) * 18;
+        const hitY = target.y + Math.sin(rad) * 18;
+
+        const startX = serverX;
+        const startY = SERVER_Y;
+        const setterTargetX = 245;
+        const setterTargetY = 168;
+
+        const serveDuration = 520;
+        const passDuration = 600;
+        const startTime = performance.now();
+
+        ballGroup.classList.remove('hidden');
+
+        function step(now) {
+          const elapsed = now - startTime;
+          if (elapsed <= serveDuration) {
+            // 第一段：發球飛向接球員正面胸口
+            const t = elapsed / serveDuration;
+            const ease = t * (2 - t);
+            const bx = startX + (hitX - startX) * ease;
+            const by = startY + (hitY - startY) * ease;
+            const lift = Math.sin(t * Math.PI) * 14;
+
+            ballShadow.setAttribute('cx', bx.toFixed(1));
+            ballShadow.setAttribute('cy', (by + 6).toFixed(1));
+            ballBody.setAttribute('transform', `translate(${bx.toFixed(1)}, ${(by - lift).toFixed(1)}) rotate(${(t * 320).toFixed(0)})`);
+            animFrameId = requestAnimationFrame(step);
+          } else if (elapsed <= serveDuration + passDuration) {
+            // 第二段：從胸口正面高弧度墊向網前目標圈
+            const t = (elapsed - serveDuration) / passDuration;
+            const bx = hitX + (setterTargetX - hitX) * t;
+            const by = hitY + (setterTargetY - hitY) * t;
+            const lift = Math.sin(t * Math.PI) * 34;
+            const scale = 1 + Math.sin(t * Math.PI) * 0.25;
+
+            ballShadow.setAttribute('cx', bx.toFixed(1));
+            ballShadow.setAttribute('cy', (by + 8).toFixed(1));
+            ballBody.setAttribute(
+              'transform',
+              `translate(${bx.toFixed(1)}, ${(by - lift).toFixed(1)}) scale(${scale.toFixed(2)}) rotate(${(-t * 220).toFixed(0)})`
+            );
+            animFrameId = requestAnimationFrame(step);
+          } else {
+            setTimeout(() => {
+              ballGroup.classList.add('hidden');
+            }, 260);
+          }
+        }
+
+        animFrameId = requestAnimationFrame(step);
+      });
+
+      // 初始化繪製
+      render();
+    })();
+  </script>
+</body>
+</html>
